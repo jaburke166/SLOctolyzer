@@ -1,11 +1,11 @@
 import os
 import sys
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 SCRIPT_PATH = os.path.realpath(os.path.dirname(__file__))
 sys.path.append(SCRIPT_PATH)
 
 import numpy as np
 import torch
+import cv2
 from skimage import morphology as morph
 from skimage import measure, exposure
 from tqdm.autonotebook import tqdm
@@ -139,26 +139,21 @@ class SLOSegmenter:
             img_shape = img.shape
             img = exposure.rescale_intensity(img, in_range='image', out_range=(0,255))
             img = ImageOps.grayscale(Image.fromarray(img))
-
-        # If downsamples to (768,768), prepare for upsampling
-        if img_shape != (768,768):
-            RESIZE = T.Resize(img_shape, antialias=True)
-        else:
-            RESIZE = None
             
+        RESIZE = T.Resize(size=img_shape, antialias=True)
         with torch.no_grad():
             img, (M, N) = self.transform(img)
             img = img.unsqueeze(0).to(self.device)
-            pred = self.model(img).squeeze(0).sigmoid()[1][:M, :N]
+            pred = self.model(img).squeeze(0).sigmoid()[1][:M, :N].cpu()
 
             # Resize back to native resolution
-            if RESIZE is not None:
-                pred = RESIZE(tv_tensors.Image(pred))[0]
+            if img_shape != (768,768):
+                pred = RESIZE(pred.unsqueeze(0))[0]
 
             # Return if soft_pred, otherwise post-process
             if soft_pred:
-                return pred.cpu().numpy()
-            pred = (pred > self.threshold).int().cpu().numpy()
+                return pred.numpy()
+            pred = (pred > self.threshold).int().numpy()
             pred = process_slomap(pred)
 
             return pred

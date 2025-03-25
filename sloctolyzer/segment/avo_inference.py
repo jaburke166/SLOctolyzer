@@ -1,6 +1,5 @@
 import os
 import sys
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 SCRIPT_PATH = os.path.realpath(os.path.dirname(__file__))
 sys.path.append(SCRIPT_PATH)
 
@@ -228,31 +227,25 @@ class AVOSegmenter:
             img = exposure.rescale_intensity(img, in_range='image', out_range=(0,255))
             img = ImageOps.grayscale(Image.fromarray(img))
 
-        # If downsamples to (768,768), prepare for upsampling
-        if img_shape != (768,768):
-            RESIZE = T.Resize(img_shape, antialias=True)
-        else:
-            RESIZE = None
-
         # Predict segmentation map and post-process
+        RESIZE = T.Resize(size=img_shape, antialias=True)
         with torch.no_grad():
             img = self.transform(img)
             img = img.unsqueeze(0).to(self.device)
-            pred = self.model(img).squeeze(0).sigmoid()
+            pred = self.model(img).squeeze(0).sigmoid().cpu()
 
             # Resize back to native resolution
-            if RESIZE is not None:
-                pred = RESIZE(tv_tensors.Image(pred))
+            if img_shape != (768,768):
+                pred = RESIZE(pred)
 
             # Return if soft_pred, otherwise post-process
             if soft_pred:
-                return pred.cpu().numpy()
+                return pred.numpy()
 
             # Assuming a binary vessel map from binary SLO segmenter,
             # i.e. original setup
-            pred = pred.cpu().numpy()
             if vbinmap is None:
-                pred = (pred > self.threshold)
+                pred = (pred > self.threshold).numpy()
     
                 # Work out vessel class
                 imAV,imA,imV,imOD = pred

@@ -1,7 +1,5 @@
 import os
 import sys
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-
 SCRIPT_PATH = os.path.realpath(os.path.dirname(__file__))
 MODULE_PATH = os.path.split(SCRIPT_PATH)[0]
 PACKAGE_PATH = os.path.split(MODULE_PATH)[0]

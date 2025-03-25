@@ -1,11 +1,11 @@
 import os
 import sys
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 SCRIPT_PATH = os.path.realpath(os.path.dirname(__file__))
 sys.path.append(SCRIPT_PATH)
 
 import numpy as np
 import torch
+import cv2
 from skimage import morphology as morph
 from skimage import measure, exposure
 from tqdm.autonotebook import tqdm
@@ -107,7 +107,7 @@ def _get_fovea(pred, threshold=0.5):
     Extract fovea coordinate from thresholded mask
     '''
     # If fovea mask predicts lower than threshold, apply filter instead of centroid
-    binmask = (pred > threshold).cpu().numpy()[0]
+    binmask = (pred > threshold)
     if binmask.sum() == 0:
         fovea = _process_fovea_prediction(pred)[0]
         return fovea
@@ -164,28 +164,24 @@ class FOVSegmenter:
             img_shape = img.shape
             img = exposure.rescale_intensity(img, in_range='image', out_range=(0,255))
             img = ImageOps.grayscale(Image.fromarray(img))
-
-        # If downsamples to (768,768), prepare for upsampling
-        if img_shape != (768,768):
-            RESIZE = T.Resize(img_shape, antialias=True)
-        else:
-            RESIZE = None
             
+        RESIZE = T.Resize(size=img_shape, antialias=True)
         with torch.no_grad():
             img, (M, N) = self.transform(img)
             img = img.unsqueeze(0).to(self.device)
-            pred = self.model(img).squeeze(0).sigmoid()[:M, :N]
+            pred = self.model(img).squeeze(0).sigmoid()[:M, :N].cpu()
 
             # Resize back to native resolution
-            if RESIZE is not None:
-                pred = RESIZE(tv_tensors.Image(pred))
+            if img_shape != (768,768):
+                pred = RESIZE(pred)
 
             # Return if soft_pred, otherwise post-process
+            pred = pred.numpy()[0]
             if soft_pred:
-                return pred.cpu().numpy()[0]
+                return pred
             fovea = _get_fovea(pred, self.threshold)
     
-            return pred[0].cpu().numpy(), fovea
+            return pred, fovea
 
     def predict_list(self, img_list, soft_pred=False):
         """Inference on a list of images without batching"""

@@ -1,6 +1,4 @@
 import os
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-
 import pandas as pd
 import numpy as np
 import cv2
@@ -407,7 +405,10 @@ def analyse(path,
 
         # Plot the segmentations superimposed onto the SLO
         if save_images or collate_segmentations:
-
+            msg = f"\n\nSaving out segmentation composition..."
+            logging_list.append(msg)
+            if verbose:
+                print(msg)
             save_info = [fname, save_path, dirpath, save_images, collate_segmentations]
             zonal_masks = list(masks.values())
             utils.superimpose_segmentation(slo, slo_vbinmap, slo_avimout, 
@@ -447,7 +448,7 @@ def analyse(path,
                 msg += f"and {warning_zones[-1]}. Please check artery-vein segmentation."
             if verbose:
                 print(msg)
-        logging_list.append(msg)
+            logging_list.append(msg)
 
         # add AVR to measurement dataframe
         null_dict = {key:len(all_grids)*[-1] for key in reorder_cols[2:]}

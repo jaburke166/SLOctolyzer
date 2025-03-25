@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import SimpleITK as sitk
 import eyepy
+import shutil
 
 from PIL import Image, ImageOps
 from skimage import segmentation, measure, morphology
@@ -548,7 +549,11 @@ def superimpose_segmentation(slo, slo_vbinmap, slo_avimout,
         segmentation_directory = os.path.join(dirpath, "segmentations")
         if not os.path.exists(segmentation_directory):
             os.mkdir(segmentation_directory)
-        fig.savefig(os.path.join(segmentation_directory, f"{fname}.png"), bbox_inches="tight")
+        if save_images:
+            shutil.copy(os.path.join(save_path, f"{fname}_superimposed.png"), 
+                        os.path.join(segmentation_directory, f"{fname}_superimposed.png"))
+        else:
+            fig.savefig(os.path.join(segmentation_directory, f"{fname}.png"), bbox_inches="tight")
     plt.close()
 
 
