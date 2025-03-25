@@ -5,7 +5,7 @@ SLOctolyzer is a fully automatic pipeline which is capable of fully characterisi
 
 Please find the journal article describing SLOctolyzer's entire pipeline [here](https://tvst.arvojournals.org/article.aspx?articleid=2802220), which was previously published in ARVO's Translational Vision Science and Technology.
 
-SLOctolyzer is also capable of extracting clinically-relevant features of interest of the segmented retinal vessels. The code used to measure retinal vessel features is heavily based on the code produced by [Automorph](https://tvst.arvojournals.org/article.aspx?articleid=2783477), whose codebase can be found [here](https://github.com/rmaphoh/AutoMorph).
+SLOctolyzer is also capable of extracting clinically-relevant features of interest of the segmented retinal vessels. The code used to measure retinal vessel features is heavily based on the code produced by [Automorph](https://tvst.arvojournals.org/article.aspx?articleid=2783477), whose codebase can be found [here](https://github.com/rmaphoh/AutoMorph), and an improved version [here](https://github.com/jaburke166/AutoMorphalyzer).
 
 See below for a visual description of SLOctolyzer's analysis pipeline.
 
@@ -280,6 +280,10 @@ article{burke2024sloctolyzer,
 ---
 
 ## Updates
+
+### 24/03/2025
+
+* Improved efficiency of feature measurement pipeline, replacing AutoMorph's vessel width measurements with those used by AutoMorphalyzer.
 
 ### 14/02/2025
 

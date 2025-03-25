@@ -1,8 +1,8 @@
 # MAKE SURE NAMES AND INPUTS ARE SEPARATED WITH ": " [colon-spacebar]
 
-image_directory: C:\Users\s1522100\Documents\PhD Work\Python Scripts\Github\SLOctolyzer\analyze\demo
+image_directory: /Users/s1522100/Documents/SLOctolyzer/analyze/demo
 
-output_directory: C:\Users\s1522100\Documents\PhD Work\Python Scripts\Github\SLOctolyzer\analyze\output
+output_directory: /Users/s1522100/Documents/SLOctolyzer/analyze/demo_output
 
 -------------------------------------------------------------------------------------------------------------
 

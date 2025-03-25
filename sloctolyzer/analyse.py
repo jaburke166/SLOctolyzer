@@ -1,21 +1,17 @@
 import os
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
-import torch
-import sys
 import cv2
-import scipy
 import copy
 from PIL import Image, ImageOps
-from eyepy.core import utils as eyepy_utils
-from eyepy.io.he import vol_reader
-from skimage import segmentation, morphology
 from pathlib import Path, WindowsPath, PosixPath
 from sloctolyzer import utils
-from sloctolyzer.measure import slo_measurement
+from sloctolyzer.measure import get_vessel_coords, feature_measurement
 from sloctolyzer.segment import slo_inference, avo_inference, fov_inference
 
+# Function to analyse a single IR-SLO image
 def analyse(path, 
             save_path=None, 
             scale=None,
@@ -360,40 +356,20 @@ def analyse(path,
         Image.fromarray((avoimout_save).astype(np.uint8)).save(os.path.join(save_path,f"{fname}_slo_avod_map.png"))
 
     # FEATURE MEASUREMENTS
-    # - macula-centred SLO: 8mm square ROI if scale specified, otherwise whole image
-    # - optic disc-centred SLO: Zone B and C (0.5-1, 0.5-2 annulus) around optic disc, and whole image
+    # - macula-centred SLO: Whole image
+    # - optic disc-centred SLO: Zone B and C (0.5D-1D, 0D-2D annulus) around optic disc, and whole image
     msg = "\n\nFEATURE MEASUREMENT..."
     logging_list.append(msg)
     if verbose:
         print(msg)
+    
     if compute_metrics:
-        slo_dict = {}
-        slo_keys = ["binary", "artery", "vein"]
-
-        # specifying params for measurements
-        if location == 'Macula':
-            rois = ["whole"]
-            macula_r = [0]
-        elif location == 'Optic disc':
-            rois = ["B", "C"]
-            macula_r = [-1, -1]
-            rois.extend(["whole"])
-            macula_r.extend([0])
 
         # Logging
         msg = f"\nMeasuring en-face vessel metrics on {location.lower()}-centred SLO image"
         
-        if location == "Macula":
-            postfix_msg = " using a fovea-centred region of interest"
-            slo_roi_center = fovea.copy()
-        elif location == "Optic disc":
-            postfix_msg = " using an optic disc-centred region of interest"
-            slo_roi_center =  od_centre.copy()
-            
         # if scale is None:
-        msg += " using the whole image. This may lead to non-standardised measurements across a population."
-        # else:
-           # msg += postfix_msg + f" using a {macula_r[-1]}mm, {rois[-1]}-shaped ROI."
+        msg += " using the whole image."
         logging_list.append(msg)
         if verbose:
             print(msg)
@@ -404,125 +380,46 @@ def analyse(path,
             if verbose:
                 print(msg)
 
-        # Loop over vessel maps to measure
+        # Compute vessel metrics
+        slo_dict = {}
+        slo_keys = ["binary", "artery", "vein"]
         artery_vbinmap, vein_vbinmap = slo_avimout[...,0], slo_avimout[...,2]
+        masks = utils.generate_zonal_masks((N,N), od_radius, od_centre, location)
+
         for v_map, v_type in zip([slo_vbinmap, artery_vbinmap, vein_vbinmap], slo_keys):
+
+            # detect individual vessels, similar to skelentonisation but detects individual vessels, and
+            # splits them at any observed intersection
+            vcoords = get_vessel_coords.generate_vessel_skeleton(v_map, od_mask, od_centre, min_length=10)
                 
             # log to user 
-            slo_dict[v_type] = {}
-            msg = f"    Measuring {v_type} SLO vessel map"
+            msg = f"    Measuring {v_type} vessel map"
             logging_list.append(msg)
             if verbose:
                 print(msg)
-            masks = []
-            #mask_rois = []
 
-            # Loop over zones and measure vessels
-            for (grid, r) in zip(rois, macula_r):
-
-                if location == 'Optic disc':
-                    msg = f"        Using zone {grid} ROI" if grid in ["B", "C"] else f"        Using {grid} ROI"
-                    logging_list.append(msg)
-                    if verbose:
-                        print(msg)
-
-                # For debugging
-                if demo_return and grid == 'C':
-                    return slo_vbinmap, fovea, od_centre, od_radius, scale, r, grid
-
-                # Compute features 
-                output = slo_measurement.measure_sloroi(v_map, 
-                                                       fovea,
-                                                       od_centre,
-                                                       od_radius,
-                                                       scale, 
-                                                       img_shape,
-                                                       v_type, 
-                                                       distance=r, 
-                                                       roi_type=grid,
-                                                       method='fast',
-                                                       verbose=verbose)
-                slo_dict[v_type][grid], logging, mask, mask_roi = output
-                masks.append(mask)
-                #mask_rois.append(mask_roi)
-                logging_list.extend(logging)
+            # Compute features 
+            slo_dict[v_type] = feature_measurement.vessel_metrics(v_map,
+                                                                vcoords,
+                                                                masks,
+                                                                scale=scale,
+                                                                vessel_type=v_type)
 
         # Plot the segmentations superimposed onto the SLO
         if save_images or collate_segmentations:
-            
-            # binary vessel mask - purple
-            slo_vcmap = utils.generate_imgmask(slo_vbinmap, None, 1)
-            stacked_img = np.hstack(3*[slo/255])
 
-            # Stacks the colour maps together, binary, then artery-vein-optic disc
-            slo_av_cmap = slo_avimout.copy()
-            slo_av_cmap[slo_av_cmap[...,1]>0,-1] = 0
-            slo_av_cmap[...,1] = 0
-            stacked_cmap = np.hstack([np.zeros_like(slo_vcmap), slo_vcmap, slo_av_cmap])
-            if od_mask.sum() != 0:
-                od_coords = avo_inference._fit_ellipse((255*od_mask).astype(np.uint8), get_contours=True)[:,0]
-                od_coords = od_coords[(od_coords[:,0] > 0) & (od_coords[:,0] < N-1)]
-                od_coords = od_coords[(od_coords[:,1] > 0) & (od_coords[:,1] < N-1)]
-            # od_cmap = utils.generate_imgmask(np.hstack(2*[np.zeros_like(od_mask)]+[od_boundary]), None, 1)
-            # od_cmap = utils.generate_imgmask(np.hstack(2*[np.zeros_like(od_mask)]+[od_mask]), None, 1)
-        
-            fig, ax = plt.subplots(1,1,figsize=(18,6))
-            ax.imshow(stacked_img, cmap="gray")
-            ax.imshow(stacked_cmap, alpha=0.5)
-            for i in [N, 2*N]:
-                ax.scatter(fovea[0]+i, fovea[1], marker="X", s=100, edgecolors=(0,0,0), c="r")
-                if i == 2*N:  
-                    if od_mask.sum() != 0:
-                        ax.plot(od_coords[:,0]+i, od_coords[:,1], color='lime', linestyle='--', linewidth=3, zorder=4)
-                        if location == "Optic disc":
-                            ax.scatter(od_centre[0]+i, od_centre[1], marker="X", s=100, edgecolors=(0,0,0), c="lime", zorder=4)
-                else:
-                    if od_mask.sum() != 0:
-                        ax.plot(od_coords[:,0]+i, od_coords[:,1], color='blue', linestyle='--', linewidth=3, zorder=4)
-                        if location == "Optic disc":
-                            ax.scatter(od_centre[0]+i, od_centre[1], marker="X", s=100, edgecolors=(0,0,0), c="blue", zorder=4)
-                
-                    if location == "Optic disc":
-                        # Work out line between OD and fovea
-                        # od_intersection, fov_od_line, intersection_idx = plotinfo
-                        # x_grid, y_grid = fov_od_line
-                        # Plot regions of interest
-                        # int_idxs = []
-                        for mask, colour, z in zip(masks[:2], [0,2], [3,2]):
-                            mask_bnds = segmentation.find_boundaries(mask)
-                            # mask_int_idx = np.argwhere(mask_bnds[(y_grid, x_grid)] == 1)[0][0]
-                            # int_idxs.append(mask_int_idx)
-                            mask = np.hstack(2*[np.zeros_like(mask)]+[mask])
-                            cmap = utils.generate_imgmask(mask, None, colour)
-                            mask_bnds = np.hstack(2*[np.zeros_like(mask_bnds)]+[mask_bnds])
-                            mask_bnds = morphology.dilation(mask_bnds, footprint=morphology.disk(radius=2))
-                            cmap_bnds = utils.generate_imgmask(mask_bnds, None, colour)
-                            ax.imshow(cmap, alpha=0.25, zorder=z)
-                            ax.imshow(cmap_bnds, alpha=0.75, zorder=z)
-                        # Plot OD radius, etc.
-                        # ax.plot(fov_od_line[0]+i, fov_od_line[1], "k--", linewidth=2, zorder=3)
-                        # ax.plot(fov_od_line[0][intersection_idx[0]:]+i, fov_od_line[1][intersection_idx[0]:], "darkgreen", linewidth=2, zorder=3)
-                        # for idx, c in zip(int_idxs[::-1], ["b","r"]):
-                        #     ax.plot(fov_od_line[0][idx:intersection_idx[0]]+i, fov_od_line[1][idx:intersection_idx[0]], f"{c}--", linewidth=2, zorder=3)
-                        # ax.scatter(od_intersection[0,0]+i, od_intersection[0,1], marker="X", s=100, edgecolors=(0,0,0), c="b", zorder=4)
-                
-            # ax.imshow(od_cmap, alpha=0.5)
-            ax.set_axis_off()
-            fig.tight_layout(pad = 0)
-            if save_images:
-                fig.savefig(os.path.join(save_path, f"{fname}_superimposed.png"), bbox_inches="tight")
-            if collate_segmentations:
-                segmentation_directory = os.path.join(dirpath, "segmentations")
-                if not os.path.exists(segmentation_directory):
-                    os.mkdir(segmentation_directory)
-                fig.savefig(os.path.join(segmentation_directory, f"{fname}.png"), bbox_inches="tight")
-            plt.close()
+            save_info = [fname, save_path, dirpath, save_images, collate_segmentations]
+            zonal_masks = list(masks.values())
+            utils.superimpose_segmentation(slo, slo_vbinmap, slo_avimout, 
+                                        od_mask, od_centre, 
+                                        fovea, location, zonal_masks, save_info)
+            
 
         # Organise measurements of SLO into dataframe
         slo_df = utils.nested_dict_to_df(slo_dict).reset_index()
         slo_df = slo_df.rename({"level_0":"vessel_map", "level_1":"zone"}, axis=1, inplace=False)
         reorder_cols = ["vessel_map", "zone", "fractal_dimension", "vessel_density", "average_global_calibre", 
-                        "average_local_calibre", "tortuosity_density", "CRAE_Knudtson", "CRVE_Knudtson"]
+                        "average_local_calibre", "tortuosity_density", "tortuosity_distance", "CRAE_Knudtson", "CRVE_Knudtson"]
         slo_df = slo_df[reorder_cols]
 
         # Compute AVR

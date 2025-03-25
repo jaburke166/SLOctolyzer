@@ -1,5 +1,10 @@
-import torch
 import os
+import sys
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+SCRIPT_PATH = os.path.realpath(os.path.dirname(__file__))
+sys.path.append(SCRIPT_PATH)
+
+import torch
 import cv2
 import torch.nn as nn 
 from torch.utils.data import DataLoader, Dataset
@@ -10,12 +15,8 @@ from PIL import Image
 from tqdm.autonotebook import tqdm
 from pathlib import PurePath, PosixPath
 from PIL import Image, ImageOps
-
-import sys
 from skimage import measure, exposure
 from skimage import morphology as morph
-
-SCRIPT_PATH = os.path.realpath(os.path.dirname(__file__))
 
 def process_slomap(im, strel = morph.disk(5), hole_size = 10, object_size = 150):
     """
@@ -207,7 +208,7 @@ class AVOSegmenter:
         self.threshold = threshold
         self.postprocess_OD = postprocess_opticdisc
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        #self.device = "mps" if torch.backends.mps.is_available() else "cpu"
+        self.device = "mps" if torch.backends.mps.is_available() else "cpu"
         if local_model_path is not None:
             self.model = torch.load(local_model_path, map_location=self.device)
         else:

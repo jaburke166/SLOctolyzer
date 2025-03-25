@@ -2,16 +2,15 @@ import numpy as np
 import skimage as sk
 import os
 import pandas as pd
-import pickle
 import matplotlib.pyplot as plt
 import SimpleITK as sitk
 import eyepy
 
 from PIL import Image, ImageOps
-from skimage import segmentation, measure, exposure
+from skimage import segmentation, measure, morphology
 from sklearn.linear_model import LinearRegression
-from sloctolyzer.measure import tortuosity_measures, slo_measurement
-from eyepy.core import utils as eyepy_utils
+from sloctolyzer.measure import feature_measurement
+from sloctolyzer.segment import avo_inference
 from eyepy.io.he import vol_reader
 
 
@@ -128,7 +127,7 @@ def load_volfile(vol_path, logging=[], verbose=False):
             OD_edge, OD_center = peripapillary_coords[peripapillary_coords[:,0].argsort()]
 
         circular_radius = np.abs(OD_center[0] - OD_edge[0])
-        circular_mask,_ = slo_measurement._create_circular_mask(img_shape=(slo_N,slo_N), 
+        circular_mask,_ = feature_measurement._create_circular_mask(img_shape=(slo_N,slo_N), 
                                                              center=OD_center, 
                                                              radius=circular_radius)
         circular_bnd_mask = segmentation.find_boundaries(circular_mask)
@@ -335,7 +334,7 @@ def compute_opticdisc_radius(fovea, od_centre, od_mask):
 
     # Now we can work out the optic disc radius, according to it's position with the fovea
     od_bounds = np.concatenate([od_centre.reshape(1,-1), od_intersection], axis=0)
-    od_radius = tortuosity_measures._curve_length(od_bounds[:,0], od_bounds[:,1])
+    od_radius = feature_measurement._curve_length(od_bounds[:,0], od_bounds[:,1])
 
     plot_info = (od_intersection, (x_grid, y_grid), intersection_idx)
 
@@ -488,3 +487,117 @@ def print_error(fname, e):
     print(skip)
     logging_list = [user_fail, message] + trace + [skip]
     return logging_list
+
+
+def superimpose_segmentation(slo, slo_vbinmap, slo_avimout, 
+                             od_mask, od_centre, 
+                             fovea, location, zonal_masks,
+                             save_info):
+    '''
+    Superimpose the segmentation masks onto the SLO image.
+    '''
+    fname, save_path, dirpath, save_images, collate_segmentations = save_info
+    # binary vessel mask - purple
+    N = slo_vbinmap.shape[0]
+    slo_vcmap = generate_imgmask(slo_vbinmap, None, 1)
+    stacked_img = np.hstack(3*[slo/255])
+
+    # Stacks the colour maps together, binary, then artery-vein-optic disc
+    slo_av_cmap = slo_avimout.copy()
+    slo_av_cmap[slo_av_cmap[...,1]>0,-1] = 0
+    slo_av_cmap[...,1] = 0
+    stacked_cmap = np.hstack([np.zeros_like(slo_vcmap), slo_vcmap, slo_av_cmap])
+    if od_mask.sum() != 0:
+        od_coords = avo_inference._fit_ellipse((255*od_mask).astype(np.uint8), get_contours=True)[:,0]
+        od_coords = od_coords[(od_coords[:,0] > 0) & (od_coords[:,0] < N-1)]
+        od_coords = od_coords[(od_coords[:,1] > 0) & (od_coords[:,1] < N-1)]
+
+    fig, ax = plt.subplots(1,1,figsize=(18,6))
+    ax.imshow(stacked_img, cmap="gray")
+    ax.imshow(stacked_cmap, alpha=0.5)
+    for i in [N, 2*N]:
+        ax.scatter(fovea[0]+i, fovea[1], marker="X", s=100, edgecolors=(0,0,0), c="r")
+        if i == 2*N:  
+            if od_mask.sum() != 0:
+                ax.plot(od_coords[:,0]+i, od_coords[:,1], color='lime', linestyle='--', linewidth=3, zorder=4)
+                if location == "Optic disc":
+                    ax.scatter(od_centre[0]+i, od_centre[1], marker="X", s=100, edgecolors=(0,0,0), c="lime", zorder=4)
+        else:
+            if od_mask.sum() != 0:
+                ax.plot(od_coords[:,0]+i, od_coords[:,1], color='blue', linestyle='--', linewidth=3, zorder=4)
+                if location == "Optic disc":
+                    ax.scatter(od_centre[0]+i, od_centre[1], marker="X", s=100, edgecolors=(0,0,0), c="blue", zorder=4)
+        
+            if location == "Optic disc":
+                for mask, colour, z in zip(zonal_masks[1:], [0,2], [3,2]):
+                    mask_bnds = segmentation.find_boundaries(mask)
+                    mask = np.hstack(2*[np.zeros_like(mask)]+[mask])
+                    cmap = generate_imgmask(mask, None, colour)
+                    mask_bnds = np.hstack(2*[np.zeros_like(mask_bnds)]+[mask_bnds])
+                    mask_bnds = morphology.dilation(mask_bnds, footprint=morphology.disk(radius=2))
+                    cmap_bnds = generate_imgmask(mask_bnds, None, colour)
+                    ax.imshow(cmap, alpha=0.25, zorder=z)
+                    ax.imshow(cmap_bnds, alpha=0.75, zorder=z)
+
+    # ax.imshow(od_cmap, alpha=0.5)
+    ax.set_axis_off()
+    fig.tight_layout(pad = 0)
+    if save_images:
+        fig.savefig(os.path.join(save_path, f"{fname}_superimposed.png"), bbox_inches="tight")
+    if collate_segmentations:
+        segmentation_directory = os.path.join(dirpath, "segmentations")
+        if not os.path.exists(segmentation_directory):
+            os.mkdir(segmentation_directory)
+        fig.savefig(os.path.join(segmentation_directory, f"{fname}.png"), bbox_inches="tight")
+    plt.close()
+
+
+
+def _create_circular_mask(center, img_shape, radius):
+    """
+    Given a center, radius and image shape, draw a filled circle
+    as a binary mask.
+    """
+    # Circular mask
+    h, w = img_shape
+    Y, X = np.ogrid[:h, :w]
+    dist_from_center = np.sqrt((X - center[0])**2 + (Y-center[1])**2)
+    mask = (dist_from_center <= radius).astype(int)
+    
+    return mask
+
+
+
+def generate_zonal_masks(img_shape, od_radius, od_centre, location='Macular'):
+
+    mask_rois = {}
+    if location=='Macula':
+        zones = ['whole']
+    elif location=='Optic disc':
+        zones = ['whole', 'B', 'C']
+
+    for roi_type in zones:
+        if roi_type == 'whole':
+            mask = np.ones(img_shape)
+        else:
+            if roi_type == "B":
+                od_circ = _create_circular_mask(img_shape=img_shape, 
+                                            radius=2*od_radius, 
+                                            center=od_centre)
+                
+                mask  = _create_circular_mask(img_shape=img_shape, 
+                                            radius=3*od_radius, 
+                                            center=od_centre)
+            elif roi_type == "C":
+                od_circ = _create_circular_mask(img_shape=img_shape, 
+                                            radius=od_radius, 
+                                            center=od_centre)
+                
+                mask = _create_circular_mask(img_shape=img_shape, 
+                                                radius=5*od_radius, 
+                                                center=od_centre)
+
+            mask -= od_circ
+        mask_rois[roi_type] = mask
+
+    return mask_rois

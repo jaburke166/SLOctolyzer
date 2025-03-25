@@ -1,7 +1,11 @@
-import numpy as np
-import torch
 import os
 import sys
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+SCRIPT_PATH = os.path.realpath(os.path.dirname(__file__))
+sys.path.append(SCRIPT_PATH)
+
+import numpy as np
+import torch
 from skimage import morphology as morph
 from skimage import measure, exposure
 from tqdm.autonotebook import tqdm
@@ -13,8 +17,6 @@ from torchvision.transforms import functional as TF
 from torchvision import tv_tensors
 from sloctolyzer.segment import unet
 
-SCRIPT_PATH = os.path.realpath(os.path.dirname(__file__))
-sys.path.append(SCRIPT_PATH)
 
 def process_slomap(im, strel = morph.disk(5), hole_size = 10, object_size = 150):
     """
@@ -115,7 +117,7 @@ class SLOSegmenter:
         self.transform = get_default_img_transforms()
         self.threshold = threshold
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        #self.device = "mps" if torch.backends.mps.is_available() else "cpu"
+        self.device = "mps" if torch.backends.mps.is_available() else "cpu"
         if local_model_path is not None:
             self.model = torch.load(local_model_path, map_location=self.device)
         else:

@@ -1,21 +1,15 @@
 import os
 import sys
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
 SCRIPT_PATH = os.path.realpath(os.path.dirname(__file__))
-if os.name == 'posix': 
-    MODULE_PATH = "/".join(SCRIPT_PATH.split('/')[:-1])
-    PACKAGE_PATH = "/".join(SCRIPT_PATH.split('/')[:-2])
-elif os.name == 'nt':
-    MODULE_PATH = "\\".join(SCRIPT_PATH.split('\\')[:-1])
-    PACKAGE_PATH = "\\".join(SCRIPT_PATH.split('\\')[:-2])
+MODULE_PATH = os.path.split(SCRIPT_PATH)[0]
+PACKAGE_PATH = os.path.split(MODULE_PATH)[0]
 sys.path.append(SCRIPT_PATH)
 sys.path.append(MODULE_PATH)
 sys.path.append(PACKAGE_PATH)
 
-import shutil
-import argparse
 import time
-import pprint
-import cv2
 import numpy as np
 from tqdm import tqdm
 import pandas as pd
@@ -23,10 +17,7 @@ from pathlib import Path, PosixPath, WindowsPath
 import analyse
 from PIL import Image, ImageOps
 import utils
-from skimage import segmentation, morphology
-import matplotlib.pyplot as plt
 from segment import slo_inference, avo_inference, fov_inference
-from measure import slo_measurement
 import utils
 
 
@@ -344,7 +335,9 @@ def run(args):
                 flat_df = pd.concat([flat_df, df_flatten], axis=1)    
 
             # Order feature columns by importance in literature
-            order_str = ["fractal_dimension", "vessel_density", 'average_global_calibre', 'average_local_calibre', "tortuosity_density",
+            order_str = ["fractal_dimension", "vessel_density", 
+                         'average_global_calibre', 'average_local_calibre',
+                         "tortuosity_distance", "tortuosity_density",
                          'CRAE_Knudtson', 'CRVE_Knudtson', 'AVR']
             order_str_rv = [col+f"_{vtype}_{rtype}" for rtype in rtypes[::-1] for vtype in vtypes for col in order_str]
             flat_df = flat_df[order_str_rv]
