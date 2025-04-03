@@ -188,6 +188,10 @@ def vessel_metrics(vessels,
     slo_dict = {'whole':{}, 'B':{}, 'C':{}}
     logging_list = []
 
+    # Set scale to 1 if not provided
+    if scale is None:
+        scale = 1   
+
     # Number of vessel pixels
     vessel_total_count = np.sum(vessels==1) 
     pixel_total_count = vessels.shape[0]*vessels.shape[1]
